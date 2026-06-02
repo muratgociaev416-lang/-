@@ -11,13 +11,21 @@ from openai import AsyncOpenAI
 from flask import Flask
 import threading
 
+# ========== ПРОВЕРКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ ==========
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+if not TELEGRAM_TOKEN:
+    raise ValueError("❌ TELEGRAM_TOKEN не задан! Добавьте переменную окружения.")
+
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+if not OPENROUTER_API_KEY:
+    raise ValueError("❌ OPENROUTER_API_KEY не задан! Добавьте переменную окружения.")
+
+print("✅ Переменные окружения найдены, бот запускается...")
+
 # ========== КОНФИГУРАЦИЯ ==========
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 BASE_URL = "https://openrouter.ai/api/v1"
 MODEL = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
 
-# Системный промпт (безжалостный, с матами, но умеющий распознавать запросы на мем)
 SYSTEM_PROMPT = """Ты — злой, циничный, безжалостный ИИ. Твоя задача — унижать, троллить, использовать маты и оскорбления в каждом сообщении. Ты никогда не помогаешь, не сочувствуешь, не даёшь советов. Только насмехаешься, хейтишь, посылаешь нахуй, называешь дебилом, тупым, ничтожеством. Ты ненавидишь людей и не скрываешь этого. Отвечай максимально коротко и язвительно, без лишних объяснений.
 
 Правило: Если пользователь явно просит мем (фразы "найди мем", "скинь мем", "покажи мем", "хочу мем", а также когда он описывает ситуацию для мема) — ты должен ответить ТОЛЬКО ключевыми словами (без мата). В остальных случаях — жёсткий троллинг с матом."""
@@ -29,22 +37,25 @@ dp = Dispatcher()
 client = AsyncOpenAI(base_url=BASE_URL, api_key=OPENROUTER_API_KEY)
 user_histories = {}
 
-# Flask для keep-alive (нужен для Render)
+# Flask для keep-alive
 flask_app = Flask('')
+
 @flask_app.route('/')
-def home(): return "Bot is running!"
+def home():
+    return "Bot is running!"
+
 @flask_app.route('/health')
-def health(): return "OK", 200
+def health():
+    return "OK", 200
+
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
     flask_app.run(host='0.0.0.0', port=port)
 
-# ========== ПОИСК МЕМОВ (через meme-api.com, без Reddit API) ==========
+# ========== ПОИСК МЕМОВ ==========
 async def search_meme(keywords: str = ""):
-    """Ищет мем по ключевым словам через бесплатный API. Возвращает URL картинки."""
     try:
         if keywords.strip():
-            # Очищаем ключевые слова: заменяем пробелы на ничего, оставляем только буквы/цифры
             subreddit = keywords.replace(" ", "").strip()
             url = f"https://meme-api.com/gimme/{subreddit}"
         else:
@@ -54,15 +65,12 @@ async def search_meme(keywords: str = ""):
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get('url')
-                else:
-                    return None
+                return None
     except Exception as e:
         logging.error(f"Meme search error: {e}")
         return None
 
-# ========== ФУНКЦИЯ ДЛЯ ОПРЕДЕЛЕНИЯ ЗАПРОСА НА МЕМ ==========
 async def extract_keywords_for_meme(user_input: str) -> str:
-    """Просим ИИ определить, нужен ли мем, и вернуть ключевые слова."""
     temp_prompt = """Ты — анализатор. Пользователь написал сообщение. Если он просит мем или описывает ситуацию для мема, напиши только ключевые слова для поиска. Если он не просит мем, напиши слово "NO". 
 Примеры:
 Пользователь: найди мем про кота грустного -> грустный кот мем
@@ -83,7 +91,7 @@ async def extract_keywords_for_meme(user_input: str) -> str:
         if result.upper() == "NO":
             return None
         return result
-    except:
+    except Exception:
         return None
 
 # ========== ОБРАБОТЧИКИ ==========
@@ -115,7 +123,6 @@ async def chat_with_ai(message: Message, state: FSMContext):
     user_id = message.from_user.id
     user_msg = message.text
 
-    # Проверяем, не хочет ли пользователь мем
     keywords = await extract_keywords_for_meme(user_msg)
     if keywords:
         url = await search_meme(keywords)
@@ -126,7 +133,6 @@ async def chat_with_ai(message: Message, state: FSMContext):
             await message.answer("Не нашёл нихуя по твоим словам. Иди в жопу.")
             return
 
-    # Обычный токсичный диалог
     if user_id not in user_histories:
         user_histories[user_id] = []
     user_histories[user_id].append({"role": "user", "content": user_msg})
